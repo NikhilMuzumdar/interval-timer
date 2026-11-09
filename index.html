@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>40/20 Interval Timer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one centered stage — phase label, ring with big digits, controls, settings strip. */
+  :root {
+    --bg: #eef1f3;
+    --surface: #ffffff;
+    --fg: #14191d;
+    --muted: #5d6870;
+    --line: #d4dade;
+    --work: #e2531d;
+    --rest: #0f8f86;
+    --phase: var(--work);
+    --font-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+    --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1214; --surface: #171d20; --fg: #eef2f4; --muted: #8e9aa1; --line: #2a3337;
+      --work: #ff6a33; --rest: #2fc2b6; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1214; --surface: #171d20; --fg: #eef2f4; --muted: #8e9aa1; --line: #2a3337;
+    --work: #ff6a33; --rest: #2fc2b6; color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box; margin: 0;
+  }
+  body.rest { --phase: var(--rest); }
+  .stage {
+    min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: clamp(16px, 3vh, 32px); padding-block: 24px; box-sizing: border-box;
+  }
+  .phase {
+    font-family: var(--font-display); font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.12em; font-size: clamp(2rem, 6vmin, 4.5rem); color: var(--phase); margin: 0;
+    transition: color .3s;
+  }
+  .ring-wrap { position: relative; width: min(78vmin, 560px); max-width: 100%; aspect-ratio: 1; }
+  .ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+  .track { fill: none; stroke: var(--line); stroke-width: 14; }
+  .progress { fill: none; stroke: var(--phase); stroke-width: 14; stroke-linecap: round; transition: stroke .3s; }
+  .readout { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .digits {
+    font-family: var(--font-display); font-weight: 800; line-height: .9;
+    font-size: clamp(5rem, 30vmin, 15rem); font-variant-numeric: tabular-nums;
+  }
+  .sub { color: var(--muted); font-size: clamp(.9rem, 2.2vmin, 1.15rem); letter-spacing: .08em; text-transform: uppercase; }
+  .paused .digits { opacity: .45; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font: 600 1rem/1 var(--font-body); letter-spacing: .04em; cursor: pointer;
+    padding: 14px 22px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--fg); min-width: 120px;
+  }
+  button.primary { background: var(--phase); border-color: var(--phase); color: #fff; min-width: 160px; transition: background .3s, border-color .3s; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--phase); outline-offset: 2px; }
+  .settings { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: .95rem; }
+  .settings label { display: flex; align-items: center; gap: 8px; }
+  .settings input {
+    width: 4.5em; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--fg); font: 500 1rem var(--font-body); font-variant-numeric: tabular-nums;
+  }
+  .hint { color: var(--muted); font-size: .85rem; margin: 0; text-align: center; }
+  kbd { font-family: var(--font-body); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; background: var(--surface); }
+  /* In fullscreen, hide the setup strip so only the timer shows */
+  :fullscreen .settings, :fullscreen .hint { display: none; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main class="stage" id="stage">
+  <h1 class="phase" id="phase">Work</h1>
+  <div class="ring-wrap">
+    <svg viewBox="0 0 200 200" aria-hidden="true">
+      <circle class="track" cx="100" cy="100" r="88"></circle>
+      <circle class="progress" id="progress" cx="100" cy="100" r="88"></circle>
+    </svg>
+    <div class="readout">
+      <div class="digits" id="digits" role="timer" aria-live="off">40</div>
+      <div class="sub" id="sub">Round 1 · Ready</div>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="primary" id="toggle" type="button">Start</button>
+    <button id="reset" type="button">Reset</button>
+    <button id="fs" type="button">Full screen</button>
+  </div>
+  <div class="settings">
+    <label for="workSec">Work <input id="workSec" type="number" min="1" max="3600" value="40"> sec</label>
+    <label for="restSec">Rest <input id="restSec" type="number" min="1" max="3600" value="20"> sec</label>
+    <label for="sound"><input id="sound" type="checkbox" checked style="width:auto"> Beeps</label>
+  </div>
+  <p class="hint"><kbd>Space</kbd> start / pause · <kbd>F</kbd> full screen · <kbd>R</kbd> reset<br>Press Start once here, then your earbuds can pause and resume it.</p>
+  <audio id="keepAlive" loop preload="auto" hidden></audio>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const digits = $('digits'), sub = $('sub'), phaseEl = $('phase'), toggle = $('toggle');
+  const progress = $('progress'), workIn = $('workSec'), restIn = $('restSec'), soundIn = $('sound');
+  const C = 2 * Math.PI * 88;
+  progress.style.strokeDasharray = C;
+
+  const dur = p => Math.max(1, Math.round(Number(p === 'work' ? workIn.value : restIn.value) || (p === 'work' ? 40 : 20))) * 1000;
+
+  let phase = 'work', round = 1, running = false, started = false;
+  let remaining = dur('work');   // ms left in current phase
+  let endAt = 0, raf = 0, ticker = 0, lastShown = null, wakeLock = null, audio = null;
+
+  // Browsers only send earbud and media-key presses to a page that is playing audio,
+  // so a 10-second near-silent loop (about -84 dB) plays while the timer runs.
+  const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;
+  const keepAlive = $('keepAlive');
+  let lastTitle = '', lastState = '';
+  keepAlive.src = (() => {
+    const rate = 8000, n = rate * 10, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const str = (at, s) => [...s].forEach((c, i) => v.setUint8(at + i, c.charCodeAt(0)));
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+    v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 2 : -2, true);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  })();
+
+  function syncMedia() {
+    if (!ms) return;
+    const state = running ? 'playing' : 'paused';
+    if (state !== lastState) { lastState = state; ms.playbackState = state; }
+    const title = `${phase === 'work' ? 'Work' : 'Rest'} · Round ${round}`;
+    if (title !== lastTitle) {
+      lastTitle = title;
+      ms.metadata = new MediaMetadata({ title, artist: '40/20 Interval Timer' });
+    }
+  }
+  function syncPosition() {
+    if (!ms || !ms.setPositionState) return;
+    try {
+      const d = dur(phase);
+      ms.setPositionState({ duration: d / 1000, position: Math.min(d, Math.max(0, d - remaining)) / 1000, playbackRate: 1 });
+    } catch (e) {}
+  }
+
+  function beep(freq, len = 0.15, when = 0) {
+    if (!soundIn.checked) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      const t = audio.currentTime + when, o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = freq; o.type = 'sine';
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      o.connect(g).connect(audio.destination); o.start(t); o.stop(t + len + 0.02);
+    } catch (e) {}
+  }
+
+  function render() {
+    const secs = Math.ceil(remaining / 1000);
+    digits.textContent = secs;
+    const frac = remaining / dur(phase);
+    progress.style.strokeDashoffset = C * (1 - frac);
+    phaseEl.textContent = phase === 'work' ? 'Work' : 'Rest';
+    document.body.classList.toggle('rest', phase === 'rest');
+    document.body.classList.toggle('paused', started && !running);
+    sub.textContent = `Round ${round} · ` + (!started ? 'Ready' : running ? (phase === 'work' ? 'Go' : 'Recover') : 'Paused');
+    toggle.textContent = running ? 'Pause' : started ? 'Resume' : 'Start';
+    // countdown pips in the last 3 seconds
+    if (running && secs !== lastShown && secs <= 3 && secs >= 1) beep(660, 0.1);
+    lastShown = secs;
+    syncMedia();
+  }
+
+  function switchPhase() {
+    if (phase === 'work') { phase = 'rest'; beep(440, 0.4); }
+    else { phase = 'work'; round++; beep(880, 0.25); beep(880, 0.25, 0.3); }
+    remaining = dur(phase);
+    endAt = performance.now() + remaining;
+    lastShown = null;
+    syncPosition();
+  }
+
+  function step() {
+    const now = performance.now();
+    remaining = endAt - now;
+    while (remaining <= 0) {               // handles a backgrounded tab catching up
+      const over = -remaining;
+      switchPhase();
+      endAt -= over; remaining = endAt - now;
+    }
+    render();
+  }
+  function frame() { step(); raf = requestAnimationFrame(frame); }
+  function stopLoops() { cancelAnimationFrame(raf); clearInterval(ticker); }
+
+  async function lockWake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  function releaseWake() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+  function start() {
+    if (!started) { beep(880, 0.25); started = true; }
+    running = true;
+    endAt = performance.now() + remaining;
+    raf = requestAnimationFrame(frame);
+    ticker = setInterval(step, 200);   // keeps time and beeps going when the tab is hidden
+    keepAlive.play().catch(() => {});
+    lockWake(); render(); syncPosition();
+  }
+  function pause() {
+    running = false; stopLoops();
+    remaining = Math.max(0, endAt - performance.now());
+    keepAlive.pause();
+    releaseWake(); render(); syncPosition();
+  }
+  function reset() {
+    running = false; started = false; stopLoops();
+    phase = 'work'; round = 1; remaining = dur('work'); lastShown = null;
+    keepAlive.pause();
+    releaseWake(); render(); syncPosition();
+  }
+  function toggleRun() { running ? pause() : start(); }
+
+  async function toggleFs() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (e) {
+      $('fs').textContent = 'Full screen unavailable';
+    }
+  }
+  document.addEventListener('fullscreenchange', () => {
+    $('fs').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && running) lockWake(); });
+
+  if (ms) {
+    ms.setActionHandler('play', () => { if (!running) start(); });
+    ms.setActionHandler('pause', () => { if (running) pause(); });
+  }
+  // If the system stops the audio itself (say, the earbuds disconnect), pause the timer too.
+  keepAlive.addEventListener('pause', () => { if (running) pause(); });
+
+  toggle.addEventListener('click', toggleRun);
+  $('reset').addEventListener('click', reset);
+  $('fs').addEventListener('click', toggleFs);
+  [workIn, restIn].forEach(el => el.addEventListener('change', () => { if (!started) { remaining = dur(phase); render(); } }));
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') { e.preventDefault(); toggleRun(); }
+    else if (e.key === 'f' || e.key === 'F') toggleFs();
+    else if (e.key === 'r' || e.key === 'R') reset();
+  });
+
+  render();
+})();
+</script>
