@@ -17,6 +17,7 @@
     --line: #d4dade;
     --work: #e2531d;
     --rest: #0f8f86;
+    --ready: #9a6410;
     --phase: var(--work);
     --font-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
     --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
@@ -24,12 +25,12 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0e1214; --surface: #171d20; --fg: #eef2f4; --muted: #8e9aa1; --line: #2a3337;
-      --work: #ff6a33; --rest: #2fc2b6; color-scheme: dark;
+      --work: #ff6a33; --rest: #2fc2b6; --ready: #d99a2b; color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0e1214; --surface: #171d20; --fg: #eef2f4; --muted: #8e9aa1; --line: #2a3337;
-    --work: #ff6a33; --rest: #2fc2b6; color-scheme: dark;
+    --work: #ff6a33; --rest: #2fc2b6; --ready: #d99a2b; color-scheme: dark;
   }
   html, body { height: 100%; }
   body {
@@ -40,6 +41,7 @@
     box-sizing: border-box; margin: 0;
   }
   body.rest { --phase: var(--rest); }
+  body.ready { --phase: var(--ready); }
   .stage {
     min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: clamp(16px, 3vh, 32px); padding-block: 24px; box-sizing: border-box;
@@ -99,6 +101,7 @@
     <button id="fs" type="button">Full screen</button>
   </div>
   <div class="settings">
+    <label for="readySec">Get ready <input id="readySec" type="number" min="0" max="600" value="10"> sec</label>
     <label for="workSec">Work <input id="workSec" type="number" min="1" max="3600" value="40"> sec</label>
     <label for="restSec">Rest <input id="restSec" type="number" min="1" max="3600" value="20"> sec</label>
     <label for="sound"><input id="sound" type="checkbox" checked style="width:auto"> Beeps</label>
@@ -115,7 +118,14 @@
   const C = 2 * Math.PI * 88;
   progress.style.strokeDasharray = C;
 
-  const dur = p => Math.max(1, Math.round(Number(p === 'work' ? workIn.value : restIn.value) || (p === 'work' ? 40 : 20))) * 1000;
+  // 'ready' is the one-time countdown before the first work period; 0 skips it.
+  const inputs = { ready: $('readySec'), work: workIn, rest: restIn };
+  const DEFAULTS = { ready: 10, work: 40, rest: 20 };
+  const NAMES = { ready: 'Get ready', work: 'Work', rest: 'Rest' };
+  const dur = p => {
+    const v = Math.round(Number(inputs[p].value));
+    return (Number.isFinite(v) && v >= (p === 'ready' ? 0 : 1) ? v : DEFAULTS[p]) * 1000;
+  };
 
   let phase = 'work', round = 1, running = false, started = false;
   let remaining = dur('work');   // ms left in current phase
@@ -141,7 +151,7 @@
     if (!ms) return;
     const state = running ? 'playing' : 'paused';
     if (state !== lastState) { lastState = state; ms.playbackState = state; }
-    const title = `${phase === 'work' ? 'Work' : 'Rest'} · Round ${round}`;
+    const title = phase === 'ready' ? 'Get ready' : `${NAMES[phase]} · Round ${round}`;
     if (title !== lastTitle) {
       lastTitle = title;
       ms.metadata = new MediaMetadata({ title, artist: '40/20 Interval Timer' });
@@ -173,10 +183,12 @@
     digits.textContent = secs;
     const frac = remaining / dur(phase);
     progress.style.strokeDashoffset = C * (1 - frac);
-    phaseEl.textContent = phase === 'work' ? 'Work' : 'Rest';
+    phaseEl.textContent = NAMES[phase];
     document.body.classList.toggle('rest', phase === 'rest');
+    document.body.classList.toggle('ready', phase === 'ready');
     document.body.classList.toggle('paused', started && !running);
-    sub.textContent = `Round ${round} · ` + (!started ? 'Ready' : running ? (phase === 'work' ? 'Go' : 'Recover') : 'Paused');
+    const status = { ready: 'Get in position', work: 'Go', rest: 'Recover' }[phase];
+    sub.textContent = `Round ${round} · ` + (!started ? 'Ready' : running ? status : 'Paused');
     toggle.textContent = running ? 'Pause' : started ? 'Resume' : 'Start';
     // countdown pips in the last 3 seconds
     if (running && secs !== lastShown && secs <= 3 && secs >= 1) beep(660, 0.1);
@@ -185,7 +197,8 @@
   }
 
   function switchPhase() {
-    if (phase === 'work') { phase = 'rest'; beep(440, 0.4); }
+    if (phase === 'ready') { phase = 'work'; beep(880, 0.25); beep(880, 0.25, 0.3); }
+    else if (phase === 'work') { phase = 'rest'; beep(440, 0.4); }
     else { phase = 'work'; round++; beep(880, 0.25); beep(880, 0.25, 0.3); }
     remaining = dur(phase);
     endAt = performance.now() + remaining;
@@ -212,7 +225,10 @@
   function releaseWake() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
 
   function start() {
-    if (!started) { beep(880, 0.25); started = true; }
+    if (!started) {
+      started = true; beep(880, 0.25);
+      if (dur('ready') > 0) { phase = 'ready'; remaining = dur('ready'); lastShown = null; }
+    }
     running = true;
     endAt = performance.now() + remaining;
     raf = requestAnimationFrame(frame);
